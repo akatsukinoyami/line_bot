@@ -1,8 +1,9 @@
-from pyrogram   import Client, MessageHandler, Filters
-from review     import review_chan, review_line, review_all
-from config     import apiId, apiHash, confline
-from words      import command, answer
-from send       import All, AllFilt, WOStick, WOStickFilt, WOText, MedOnly
+from pyrogram       import Client, MessageHandler, Filters, InputMediaPhoto, InputMediaVideo
+from config         import apiId, apiHash, confline
+from funcs.send     import send
+from funcs.review   import review_chan, review_line, review_all
+from funcs.words    import command, answer
+from funcs.settings import settings
 import shelve
 
 class Line:
@@ -11,6 +12,7 @@ class Line:
         'state'  : True,
         'text'   : True,
         'sticker': False,
+        'copy'   : False,
         'filter' : False}):
         self.id     = id
         self.name   = name
@@ -18,11 +20,14 @@ class Line:
         self.ban_list  = ban_list
         self.settings  = settings
 
+
+
 with shelve.open('lineDB') as db:
     app = Client("user", apiId, apiHash)
 
     @app.on_message(Filters.channel & ~Filters.edited)
     def lineBot(Client, message):
+        spam_chan    = '-1001368942367'
         msg_txt      = str(message.text)
         msg_txt_sm   = msg_txt.lower()
         msg_txt_sm_split = msg_txt_sm.split()
@@ -37,7 +42,6 @@ with shelve.open('lineDB') as db:
             chan_id_fwd   = None
             chan_name_fwd = None
 
-
         if msg_txt_sm == confline['addline']:
             #Создание ленты
             a = []
@@ -48,86 +52,40 @@ with shelve.open('lineDB') as db:
                 line        = Line(chan_id, chan_name)
                 db[chan_id] = line
                 txt = txt+answer['adl_r']
-            app.send_message(chan_id, txt, reply_to_message_id=msg_id) 
+            app.send_message(chan_id, txt, reply_to_message_id=msg_id)
      
         else:
             for line in db.values():
                 if (line.settings['state'] and 
                     chan_id in line.chan_list and
                     chan_id not in line.ban_list):
-                #Пересылка сообщений из каналов в ленту
 
-                    if (line.settings['sticker'] and 
-                        line.settings['text'] and 
-                        line.settings['filter']):    send = AllFilt()
-                    elif (line.settings['text'] and 
-                          line.settings['sticker']): send = All()
-                    elif (line.settings['text'] and 
-                          line.settings['filter']):  send = WOStickFilt()
-                    elif line.settings['text']:      send = WOStick()
-                    elif line.settings['sticker']:   send = WOText()
-                    else:                            send = MedOnly()
-
-                    send.send(app, message, msg_txt_sm, line.id)
+                    send(app, message, msg_id, line, spam_chan)
 
                 elif chan_id == line.id:
+
                     txt = answer["chan"] %(str(chan_name_fwd), str(chan_id_fwd))
 
-                    if chan_id_fwd and chan_id_fwd not in line.chan_list:
-                    #Добавление канала в БД по пересланному оттуда посту  
-                        if str(chan_id_fwd) in line.chan_list:     
-                            txt = txt+answer['adc_e']
-                        else:
-                            line.chan_list.append(str(chan_id_fwd))
-                            txt = txt+answer['add_ch'] % (chan_name)
+                    if chan_id_fwd and str(chan_id_fwd) not in line.chan_list:
+                    #Добавление канала в БД по пересланному оттуда посту 
+                        print('Канал добавлен в БД.') 
+                        line.chan_list.append(str(chan_id_fwd))
+                        txt = txt+answer['add_ch'] % (chan_name)
                     
                     elif '!' in msg_txt_sm_split[0]:
                         if '!config' in msg_txt_sm_split[0]:
-                            if 'state'    in msg_txt_sm_split[1]:
-                                setting = 'state'
-                                if  'off' in msg_txt_sm_split[2]: 
-                                    line.settings['state'] = False
-                                    cond = '❎'
-                                elif 'on' in msg_txt_sm_split[2]: 
-                                    line.settings['state'] = True
-                                    cond = '✅'
-                            elif 'text'   in msg_txt_sm_split[1]:
-                                setting = 'text'
-                                if  'off' in msg_txt_sm_split[2]: 
-                                    line.settings['text'] = False
-                                    cond = '❎'
-                                elif 'on' in msg_txt_sm_split[2]: 
-                                    line.settings['text'] = True
-                                    cond = '✅'
-                            elif 'sticker'in msg_txt_sm_split[1]:
-                                setting = 'sticker'
-                                if  'off' in msg_txt_sm_split[2]: 
-                                    line.settings['sticker'] = False
-                                    cond = '❎'
-                                elif 'on' in msg_txt_sm_split[2]: 
-                                    line.settings['sticker'] = True
-                                    cond = '✅'
-                            elif 'filter' in msg_txt_sm_split[1]:
-                                setting = 'filter'
-                                if  'off' in msg_txt_sm_split[2]: 
-                                    line.settings['filter'] = False
-                                    cond = '❎'
-                                elif 'on' in msg_txt_sm_split[2]: 
-                                    line.settings['filter'] = True
-                                    cond = '✅'
-                            
-                            txt = answer['setting_r'] % (setting, cond)
+                            cond = settings(line, msg_txt_sm_split[1], msg_txt_sm_split[2])
+                            txt = answer['setting_r'] % (msg_txt_sm_split[1], cond)
 
                         elif command['list'] in msg_txt_sm_split[0]:
+                            app.edit_message_text(chan_id, msg_id, 'Подготавливаю сводку.')
                             #Просмотр списка подписок
-                            if   msg_txt_sm_split[1] in command['chan'] : txt = answer['l_subs_r']+review_chan(app, db, answer, line.chan_list)
-                            #Просмотр списка банов
-                            elif msg_txt_sm_split[1] in command['baned']: txt = answer['l_ban_r']+review_chan(app, db, answer, line.ban_list)
+                            if   msg_txt_sm_split[1] in command['chan']: txt = answer['l_subs_r']+review_chan(app, line)
                             #Просмотр списка лент
-                            elif msg_txt_sm_split[1] in command['line'] : txt = answer['l_line_r']+review_line(db, answer)
+                            elif msg_txt_sm_split[1] in command['line']: txt = answer['l_line_r']+review_line(db)
                             #Просмотр всей БД
-                            elif msg_txt_sm_split[1] in command['all']  : txt = review_all(app, db, answer)
- 
+                            elif msg_txt_sm_split[1] in command['all'] : txt = review_all(app, db)
+
                         elif command['debug'] in msg_txt_sm_split[0]:
                             txt = ('ID: '+db[line.id].id+'\n'+
                                 'Name: '+db[line.id].name+'\n'+
@@ -163,10 +121,13 @@ with shelve.open('lineDB') as db:
                                     line.chan_list.remove(str(chan_rpl_fwd.id)) 
                                     txt = answer['del_r'] %(str(chan_rpl_fwd.title), str(chan_rpl_fwd.id), chan_name)
                             except:
-                                print(message)
-                                txt = answer['failed'] %(msg_txt_sm_split[0])  
-                                                
+                                print(message) 
+                                break 
+
+                    try:
+                        app.edit_message_text(chan_id, msg_id, txt)
+                    except:
+                        app.send_message(chan_id, txt)  
                     db[line.id] = line
-                    app.send_message(chan_id, txt, reply_to_message_id=msg_id) 
-      
+                    
     app.run()
